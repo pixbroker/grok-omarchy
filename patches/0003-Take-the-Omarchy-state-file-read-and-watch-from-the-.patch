@@ -1,0 +1,359 @@
+From 27bb4b7188f441db35e3bd5caf57e3efe602d6ce Mon Sep 17 00:00:00 2001
+From: pixbroker <324802287+pixbroker@users.noreply.github.com>
+Date: Fri, 4 Sep 2026 09:04:37 +0200
+Subject: [PATCH 3/3] Take the Omarchy state, file read and watch from the
+ omarchy-theme crate.
+
+theme/omarchy.rs keeps what is Grok-specific: the slot table, the overlay
+and the render-cache generation. Locating ~/.local/state/omarchy/current,
+reading the rendered grok.toml and the swap-tolerant inotify watch now come
+from the omarchy-theme crate on crates.io (tokio feature), the same crate
+the other Omarchy-following apps use. The direct notify dependency goes
+back to upstream's optional line.
+
+Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01JPCoF4zH1BywwVMYW9qVie
+---
+ Cargo.lock                                    |  33 ++++--
+ .../codegen/xai-grok-pager-render/Cargo.toml  |   6 +-
+ .../src/theme/omarchy.rs                      | 105 +++++++-----------
+ 3 files changed, 68 insertions(+), 76 deletions(-)
+
+diff --git a/Cargo.lock b/Cargo.lock
+index 631b2521..889e5094 100644
+--- a/Cargo.lock
++++ b/Cargo.lock
+@@ -309,7 +309,7 @@ dependencies = [
+  "objc2-foundation 0.3.2",
+  "parking_lot",
+  "percent-encoding",
+- "windows-sys 0.60.2",
++ "windows-sys 0.52.0",
+  "wl-clipboard-rs",
+  "x11rb",
+ ]
+@@ -2815,7 +2815,7 @@ dependencies = [
+  "libc",
+  "option-ext",
+  "redox_users 0.5.2",
+- "windows-sys 0.61.2",
++ "windows-sys 0.59.0",
+ ]
+ 
+ [[package]]
+@@ -3138,7 +3138,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
+ checksum = "39cab71617ae0d63f51a36d69f866391735b51691dbda63cf6f96d042b63efeb"
+ dependencies = [
+  "libc",
+- "windows-sys 0.61.2",
++ "windows-sys 0.52.0",
+ ]
+ 
+ [[package]]
+@@ -3802,7 +3802,7 @@ dependencies = [
+  "libc",
+  "log",
+  "rustversion",
+- "windows-link 0.2.1",
++ "windows-link 0.1.3",
+  "windows-result 0.4.1",
+ ]
+ 
+@@ -6678,7 +6678,7 @@ version = "0.50.3"
+ source = "registry+https://github.com/rust-lang/crates.io-index"
+ checksum = "7957b9740744892f114936ab4a57b3f487491bbeafaf8083688b16841a4240e5"
+ dependencies = [
+- "windows-sys 0.61.2",
++ "windows-sys 0.59.0",
+ ]
+ 
+ [[package]]
+@@ -7102,6 +7102,16 @@ dependencies = [
+  "cc",
+ ]
+ 
++[[package]]
++name = "omarchy-theme"
++version = "0.1.0"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "c6d7458819218a27e09499842ec4a8896da87fd4e952931d6ef79d821cb96779"
++dependencies = [
++ "notify",
++ "tokio",
++]
++
+ [[package]]
+ name = "once_cell"
+ version = "1.21.3"
+@@ -7272,7 +7282,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
+ checksum = "7d8fae84b431384b68627d0f9b3b1245fcf9f46f6c0e3dc902e9dce64edd1967"
+ dependencies = [
+  "libc",
+- "windows-sys 0.61.2",
++ "windows-sys 0.45.0",
+ ]
+ 
+ [[package]]
+@@ -8303,7 +8313,7 @@ dependencies = [
+  "once_cell",
+  "socket2",
+  "tracing",
+- "windows-sys 0.60.2",
++ "windows-sys 0.52.0",
+ ]
+ 
+ [[package]]
+@@ -8999,7 +9009,7 @@ dependencies = [
+  "errno",
+  "libc",
+  "linux-raw-sys 0.12.1",
+- "windows-sys 0.61.2",
++ "windows-sys 0.52.0",
+ ]
+ 
+ [[package]]
+@@ -9069,7 +9079,7 @@ dependencies = [
+  "security-framework",
+  "security-framework-sys",
+  "webpki-root-certs",
+- "windows-sys 0.61.2",
++ "windows-sys 0.52.0",
+ ]
+ 
+ [[package]]
+@@ -10444,7 +10454,7 @@ dependencies = [
+  "getrandom 0.4.1",
+  "once_cell",
+  "rustix 1.1.4",
+- "windows-sys 0.61.2",
++ "windows-sys 0.52.0",
+ ]
+ 
+ [[package]]
+@@ -12281,7 +12291,7 @@ version = "0.1.11"
+ source = "registry+https://github.com/rust-lang/crates.io-index"
+ checksum = "c2a7b1c03c876122aa43f3020e6c3c3ee5c05081c9a00739faf7503aeba10d22"
+ dependencies = [
+- "windows-sys 0.61.2",
++ "windows-sys 0.48.0",
+ ]
+ 
+ [[package]]
+@@ -13960,6 +13970,7 @@ dependencies = [
+  "libc",
+  "linkify",
+  "notify",
++ "omarchy-theme",
+  "pretty_assertions",
+  "ratatui",
+  "ratatui-core",
+diff --git a/crates/codegen/xai-grok-pager-render/Cargo.toml b/crates/codegen/xai-grok-pager-render/Cargo.toml
+index 7e35ebd3..175e3a08 100644
+--- a/crates/codegen/xai-grok-pager-render/Cargo.toml
++++ b/crates/codegen/xai-grok-pager-render/Cargo.toml
+@@ -90,8 +90,10 @@ shellexpand = "3.1"
+ # Parsing
+ url = { workspace = true }
+ 
+-# theme/omarchy.rs: inotify watch on Omarchy's theme directory
+-notify = { workspace = true }
++# Hot-reload config (dev mode)
++notify = { workspace = true, optional = true }
++# theme/omarchy.rs: the Omarchy desktop palette and its change watch
++omarchy-theme = { version = "0.1", features = ["tokio"] }
+ 
+ # libc: poll/read for non-blocking terminal reads in theme/osc11.rs.
+ [target.'cfg(unix)'.dependencies]
+diff --git a/crates/codegen/xai-grok-pager-render/src/theme/omarchy.rs b/crates/codegen/xai-grok-pager-render/src/theme/omarchy.rs
+index c2a9b9a7..4109335e 100644
+--- a/crates/codegen/xai-grok-pager-render/src/theme/omarchy.rs
++++ b/crates/codegen/xai-grok-pager-render/src/theme/omarchy.rs
+@@ -5,7 +5,8 @@
+ //! swaps the whole `theme` directory in atomically.
+ //! With `[ui] theme = "omarchy"` the pager reads that file at startup, lays its
+ //! `[colors]` over the built-in theme that matches its `base` polarity, and re-reads
+-//! it whenever the `current` directory changes (inotify via `notify`).
++//! it whenever the `current` directory changes. Locating the state directory, reading
++//! the rendered file and the inotify watch come from the `omarchy-theme` crate.
+ //! A running session therefore retints at the same moment as Ghostty and the other
+ //! native Omarchy apps, without a hook, a signal, or a poll.
+ //!
+@@ -19,18 +20,18 @@
+ //! ```
+ 
+ use std::collections::BTreeMap;
+-use std::path::{Path, PathBuf};
+ use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+ use std::sync::{Arc, RwLock};
+ 
+-use notify::Watcher as _;
++use omarchy_theme::{Omarchy, Subscription};
+ use ratatui::style::Color;
+-use tokio::sync::watch;
+ 
+ use super::{Theme, ThemeKind};
+ 
+ /// The `[ui].theme` value that turns this mode on.
+ pub const NAME: &str = "omarchy";
++/// The file Omarchy renders from `~/.config/omarchy/themed/grok.toml.tpl`.
++const THEME_FILE: &str = "grok.toml";
+ 
+ /// Set by [`enable`] when the config names [`NAME`]; never cleared outside tests.
+ static ENABLED: AtomicBool = AtomicBool::new(false);
+@@ -64,16 +65,11 @@ pub fn is_enabled() -> bool {
+ 
+ /// Omarchy's `current` state directory.
+ /// `GROK_OMARCHY_STATE_DIR` overrides it so a session can be pointed at a scratch copy.
+-#[must_use]
+-pub fn state_dir() -> Option<PathBuf> {
+-    if let Some(dir) = std::env::var_os("GROK_OMARCHY_STATE_DIR") {
+-        return Some(PathBuf::from(dir));
++fn omarchy() -> Option<Omarchy> {
++    match std::env::var_os("GROK_OMARCHY_STATE_DIR") {
++        Some(dir) => Some(Omarchy::at(dir)),
++        None => Omarchy::detect(),
+     }
+-    Some(xai_dirs::home_dir()?.join(".local/state/omarchy/current"))
+-}
+-
+-fn theme_file() -> Option<PathBuf> {
+-    state_dir().map(|dir| dir.join("theme/grok.toml"))
+ }
+ 
+ /// Turn omarchy mode on and load the palette. Returns the base kind to render under.
+@@ -111,21 +107,21 @@ pub fn reload() -> bool {
+     if !is_enabled() {
+         return false;
+     }
+-    theme_file().is_some_and(|path| reload_from(&path))
++    match omarchy().map(|o| o.read_theme_file(THEME_FILE)) {
++        Some(Ok(text)) => apply_text(&text),
++        Some(Err(error)) => {
++            tracing::debug!(%error, "omarchy theme file unreadable; keeping palette");
++            false
++        }
++        None => false,
++    }
+ }
+ 
+-fn reload_from(path: &Path) -> bool {
+-    let text = match std::fs::read_to_string(path) {
+-        Ok(text) => text,
+-        Err(error) => {
+-            tracing::debug!(path = %path.display(), %error, "omarchy theme file unreadable; keeping palette");
+-            return false;
+-        }
+-    };
+-    let overlay = match parse(&text) {
++fn apply_text(text: &str) -> bool {
++    let overlay = match parse(text) {
+         Ok(overlay) => overlay,
+         Err(error) => {
+-            tracing::warn!(path = %path.display(), %error, "omarchy theme file malformed; keeping palette");
++            tracing::warn!(%error, "omarchy theme file malformed; keeping palette");
+             return false;
+         }
+     };
+@@ -247,13 +243,9 @@ fn slot_mut<'a>(t: &'a mut Theme, key: &str) -> Option<&'a mut Color> {
+ }
+ 
+ /// Wakes the event loop whenever Omarchy touches its `current` directory.
+-///
+-/// Omarchy removes `current/theme` and moves the freshly rendered directory into
+-/// its place, so the watch sits on the parent, which survives the swap.
+ /// Every event is a wake-up; [`reload`] decides whether the palette really changed.
+ pub struct Watcher {
+-    rx: watch::Receiver<u64>,
+-    _inner: notify::RecommendedWatcher,
++    subscription: Subscription,
+ }
+ 
+ impl Watcher {
+@@ -264,29 +256,21 @@ impl Watcher {
+         if !is_enabled() {
+             return None;
+         }
+-        let dir = state_dir()?;
+-        let (tx, rx) = watch::channel(0u64);
+-        let mut inner = notify::recommended_watcher(
+-            move |result: notify::Result<notify::Event>| match result {
+-                Ok(event) if !event.kind.is_access() => tx.send_modify(|n| *n += 1),
+-                Ok(_) => {}
+-                Err(error) => tracing::warn!(%error, "omarchy theme watch error"),
+-            },
+-        )
+-        .inspect_err(|error| tracing::warn!(%error, "omarchy theme watch unavailable"))
+-        .ok()?;
+-        inner
+-            .watch(&dir, notify::RecursiveMode::NonRecursive)
+-            .inspect_err(|error| {
+-                tracing::warn!(dir = %dir.display(), %error, "omarchy theme watch unavailable");
+-            })
+-            .ok()?;
+-        tracing::info!(dir = %dir.display(), "watching omarchy theme directory");
+-        Some(Self { rx, _inner: inner })
++        let omarchy = omarchy()?;
++        match omarchy.subscribe() {
++            Ok(subscription) => {
++                tracing::info!(dir = %omarchy.current_dir().display(), "watching omarchy theme directory");
++                Some(Self { subscription })
++            }
++            Err(error) => {
++                tracing::warn!(%error, "omarchy theme watch unavailable");
++                None
++            }
++        }
+     }
+ 
+-    pub async fn changed(&mut self) -> Result<(), watch::error::RecvError> {
+-        self.rx.changed().await
++    pub async fn changed(&mut self) -> Result<(), tokio::sync::watch::error::RecvError> {
++        self.subscription.changed().await
+     }
+ }
+ 
+@@ -330,33 +314,28 @@ mod tests {
+     }
+ 
+     #[test]
+-    fn reload_from_bumps_generation_only_on_change() {
++    fn apply_text_bumps_generation_only_on_change() {
+         let _guard = super::super::cache::test_lock()
+             .lock()
+             .unwrap_or_else(|e| e.into_inner());
+         reset_for_test();
+-        let dir = tempfile::tempdir().unwrap();
+-        let path = dir.path().join("grok.toml");
+         let before = generation();
+ 
+-        assert!(!reload_from(&path), "missing file keeps the palette");
+-        assert!(palette().is_none());
+-
+-        std::fs::write(&path, "[colors]\nbg_base = \"#010203\"\n").unwrap();
+-        assert!(reload_from(&path));
++        assert!(apply_text("[colors]\nbg_base = \"#010203\"\n"));
+         assert_eq!(generation(), before + 1);
+         assert_eq!(palette().unwrap().bg_base, Color::Rgb(1, 2, 3));
+ 
+-        assert!(!reload_from(&path), "identical content is not a change");
++        assert!(
++            !apply_text("[colors]\nbg_base = \"#010203\"\n"),
++            "identical content is not a change"
++        );
+         assert_eq!(generation(), before + 1);
+ 
+-        std::fs::write(&path, "base = \"light\"\n").unwrap();
+-        assert!(reload_from(&path));
++        assert!(apply_text("base = \"light\"\n"));
+         assert_eq!(base_kind(), ThemeKind::GrokDay);
+         assert_eq!(generation(), before + 2);
+ 
+-        std::fs::write(&path, "base = [").unwrap();
+-        assert!(!reload_from(&path), "malformed file keeps the palette");
++        assert!(!apply_text("base = ["), "malformed text keeps the palette");
+         assert_eq!(base_kind(), ThemeKind::GrokDay);
+         reset_for_test();
+     }
+-- 
+2.55.0
+

@@ -1,0 +1,44 @@
+From 0dc410c99c6b1c6e3b1425a028095f1a0ff8ae26 Mon Sep 17 00:00:00 2001
+From: pixbroker <324802287+pixbroker@users.noreply.github.com>
+Date: Fri, 4 Sep 2026 09:04:37 +0200
+Subject: [PATCH 2/3] Skip the TUI update check when the binary is not the
+ managed install.
+
+needs_update() reports any running version with a pre-release suffix as
+stale on the stable channel, so a local build stamped 1.0.16-omarchy.<sha>
+showed "v1.0.13 available, press ctrl+u to restart" on every start even
+though it is ahead of the pointer. The stdio agent already skips its
+auto-update when the executable is not <grok_home>/bin/grok; apply the same
+is_managed_install gate to the interactive background check, which drops
+both the restart hint and the background download for such builds.
+
+Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01JPCoF4zH1BywwVMYW9qVie
+---
+ crates/codegen/xai-grok-pager-bin/src/main.rs | 9 ++++++++-
+ 1 file changed, 8 insertions(+), 1 deletion(-)
+
+diff --git a/crates/codegen/xai-grok-pager-bin/src/main.rs b/crates/codegen/xai-grok-pager-bin/src/main.rs
+index 9efd3416..e64a4344 100644
+--- a/crates/codegen/xai-grok-pager-bin/src/main.rs
++++ b/crates/codegen/xai-grok-pager-bin/src/main.rs
+@@ -2367,8 +2367,15 @@ async fn async_main(args: PagerArgs) -> Result<()> {
+     type UpdateWaitHandle = tokio::task::JoinHandle<std::io::Result<std::process::ExitStatus>>;
+     let bg_update_wait: std::sync::Arc<tokio::sync::Mutex<Option<UpdateWaitHandle>>> =
+         std::sync::Arc::new(tokio::sync::Mutex::new(None));
++    // Same rule as the stdio agent: a binary that is not `<grok_home>/bin/grok` (a local build) cannot adopt a staged update,
++    // so neither the restart hint nor the background download applies to it
+     let bg_update_rx: Option<tokio::sync::oneshot::Receiver<Option<auto_update::UpdateAvailable>>> =
+-        if should_check_for_updates(args.no_auto_update) {
++        if should_check_for_updates(args.no_auto_update)
++            && is_managed_install(
++                std::env::current_exe().ok(),
++                &xai_grok_shell::util::grok_home::grok_home(),
++            )
++        {
+             let update_config = update_config.clone();
+             let wait_slot = bg_update_wait.clone();
+             let (tx, rx) = tokio::sync::oneshot::channel();
+-- 
+2.55.0
+
