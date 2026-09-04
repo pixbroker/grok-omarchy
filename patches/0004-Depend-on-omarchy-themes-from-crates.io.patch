@@ -1,0 +1,151 @@
+From a2997ca666e82a2406a64381defc6fe774d71569 Mon Sep 17 00:00:00 2001
+From: pixbroker <324802287+pixbroker@users.noreply.github.com>
+Date: Fri, 4 Sep 2026 13:30:37 +0200
+Subject: [PATCH 4/4] Depend on omarchy-themes from crates.io.
+
+---
+ Cargo.lock                                    | 28 +++++++++----------
+ .../codegen/xai-grok-pager-render/Cargo.toml  |  2 +-
+ 2 files changed, 15 insertions(+), 15 deletions(-)
+
+diff --git a/Cargo.lock b/Cargo.lock
+index 889e5094..a9eaf37c 100644
+--- a/Cargo.lock
++++ b/Cargo.lock
+@@ -309,7 +309,7 @@ dependencies = [
+  "objc2-foundation 0.3.2",
+  "parking_lot",
+  "percent-encoding",
+- "windows-sys 0.52.0",
++ "windows-sys 0.60.2",
+  "wl-clipboard-rs",
+  "x11rb",
+ ]
+@@ -2815,7 +2815,7 @@ dependencies = [
+  "libc",
+  "option-ext",
+  "redox_users 0.5.2",
+- "windows-sys 0.59.0",
++ "windows-sys 0.61.2",
+ ]
+ 
+ [[package]]
+@@ -3138,7 +3138,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
+ checksum = "39cab71617ae0d63f51a36d69f866391735b51691dbda63cf6f96d042b63efeb"
+ dependencies = [
+  "libc",
+- "windows-sys 0.52.0",
++ "windows-sys 0.61.2",
+ ]
+ 
+ [[package]]
+@@ -3802,7 +3802,7 @@ dependencies = [
+  "libc",
+  "log",
+  "rustversion",
+- "windows-link 0.1.3",
++ "windows-link 0.2.1",
+  "windows-result 0.4.1",
+ ]
+ 
+@@ -6678,7 +6678,7 @@ version = "0.50.3"
+ source = "registry+https://github.com/rust-lang/crates.io-index"
+ checksum = "7957b9740744892f114936ab4a57b3f487491bbeafaf8083688b16841a4240e5"
+ dependencies = [
+- "windows-sys 0.59.0",
++ "windows-sys 0.61.2",
+ ]
+ 
+ [[package]]
+@@ -7103,10 +7103,10 @@ dependencies = [
+ ]
+ 
+ [[package]]
+-name = "omarchy-theme"
++name = "omarchy-themes"
+ version = "0.1.0"
+ source = "registry+https://github.com/rust-lang/crates.io-index"
+-checksum = "c6d7458819218a27e09499842ec4a8896da87fd4e952931d6ef79d821cb96779"
++checksum = "906e4aa9927a2dd20a046940434ddd0212b1a4a324e888143d9467104681076a"
+ dependencies = [
+  "notify",
+  "tokio",
+@@ -7282,7 +7282,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
+ checksum = "7d8fae84b431384b68627d0f9b3b1245fcf9f46f6c0e3dc902e9dce64edd1967"
+ dependencies = [
+  "libc",
+- "windows-sys 0.45.0",
++ "windows-sys 0.61.2",
+ ]
+ 
+ [[package]]
+@@ -8313,7 +8313,7 @@ dependencies = [
+  "once_cell",
+  "socket2",
+  "tracing",
+- "windows-sys 0.52.0",
++ "windows-sys 0.60.2",
+ ]
+ 
+ [[package]]
+@@ -9009,7 +9009,7 @@ dependencies = [
+  "errno",
+  "libc",
+  "linux-raw-sys 0.12.1",
+- "windows-sys 0.52.0",
++ "windows-sys 0.61.2",
+ ]
+ 
+ [[package]]
+@@ -9079,7 +9079,7 @@ dependencies = [
+  "security-framework",
+  "security-framework-sys",
+  "webpki-root-certs",
+- "windows-sys 0.52.0",
++ "windows-sys 0.61.2",
+ ]
+ 
+ [[package]]
+@@ -10454,7 +10454,7 @@ dependencies = [
+  "getrandom 0.4.1",
+  "once_cell",
+  "rustix 1.1.4",
+- "windows-sys 0.52.0",
++ "windows-sys 0.61.2",
+ ]
+ 
+ [[package]]
+@@ -12291,7 +12291,7 @@ version = "0.1.11"
+ source = "registry+https://github.com/rust-lang/crates.io-index"
+ checksum = "c2a7b1c03c876122aa43f3020e6c3c3ee5c05081c9a00739faf7503aeba10d22"
+ dependencies = [
+- "windows-sys 0.48.0",
++ "windows-sys 0.61.2",
+ ]
+ 
+ [[package]]
+@@ -13970,7 +13970,7 @@ dependencies = [
+  "libc",
+  "linkify",
+  "notify",
+- "omarchy-theme",
++ "omarchy-themes",
+  "pretty_assertions",
+  "ratatui",
+  "ratatui-core",
+diff --git a/crates/codegen/xai-grok-pager-render/Cargo.toml b/crates/codegen/xai-grok-pager-render/Cargo.toml
+index 175e3a08..2258152b 100644
+--- a/crates/codegen/xai-grok-pager-render/Cargo.toml
++++ b/crates/codegen/xai-grok-pager-render/Cargo.toml
+@@ -93,7 +93,7 @@ url = { workspace = true }
+ # Hot-reload config (dev mode)
+ notify = { workspace = true, optional = true }
+ # theme/omarchy.rs: the Omarchy desktop palette and its change watch
+-omarchy-theme = { version = "0.1", features = ["tokio"] }
++omarchy-themes = { version = "0.1", features = ["tokio"] }
+ 
+ # libc: poll/read for non-blocking terminal reads in theme/osc11.rs.
+ [target.'cfg(unix)'.dependencies]
+-- 
+2.55.0
+

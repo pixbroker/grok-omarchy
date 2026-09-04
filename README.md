@@ -17,25 +17,25 @@ accent_user = "#81a1c1"
 The patched pager, with `[ui] theme = "omarchy"` in `~/.grok/config.toml`:
 
 - reads `current/theme/grok.toml` at startup and lays its colors over Grok Night or Grok Day;
-- holds an inotify watch on `current/`, which survives the directory swap, through the [omarchy-theme](https://crates.io/crates/omarchy-theme) crate;
+- holds an inotify watch on `current/`, which survives the directory swap, through the [omarchy-theme](https://crates.io/crates/omarchy-themes) crate;
 - on any event re-reads the file and, only if the palette actually changed, retints and repaints the cursor.
 
 That is the same moment Omarchy signals Ghostty, with no hook, no signal, and no polling. Nothing in Omarchy is modified; the template directory is a supported user extension point.
 
 ## Patch to grok-build
 
-The Omarchy side of the mechanism (locating the state directory, reading the rendered file, the swap-tolerant watch) is the shared crate [omarchy-theme](https://crates.io/crates/omarchy-theme), so any app can follow the theme the same way. Grok keeps only what is Grok-specific: the slot table and the render-cache stamp.
+The Omarchy side of the mechanism (locating the state directory, reading the rendered file, the swap-tolerant watch) is the shared crate [omarchy-themes](https://crates.io/crates/omarchy-themes), so any app can follow the theme the same way. Grok keeps only what is Grok-specific: the slot table and the render-cache stamp.
 
 `patches/` holds the `git format-patch` export of branch `omarchy` against upstream `72a61251`: three commits, one new file and a handful of lines elsewhere:
 
 | File | Change |
 |------|--------|
-| `xai-grok-pager-render/src/theme/omarchy.rs` | New. Parses the rendered file into a color-slot overlay and keeps a generation counter; the state directory, file read and inotify watch come from `omarchy-theme`. |
+| `xai-grok-pager-render/src/theme/omarchy.rs` | New. Parses the rendered file into a color-slot overlay and keeps a generation counter; the state directory, file read and inotify watch come from `omarchy-themes`. |
 | `xai-grok-pager-render/src/theme/mod.rs` | `Theme::current()` takes the Omarchy palette when present. |
 | `xai-grok-pager-render/src/theme/cache.rs` | `theme = "omarchy"` enables the mode; `ThemeStamp` = kind + overlay generation. |
 | `xai-grok-pager/src/scrollback/entry.rs`, `blocks/markdown_content.rs` | Render caches key on `ThemeStamp` so a new palette re-bakes old blocks. |
 | `xai-grok-pager/src/app/event_loop.rs` | One `select!` arm: watcher fired → reload → `apply_kind` + redraw. |
-| `xai-grok-pager-render/Cargo.toml` | Adds [`omarchy-theme`](https://crates.io/crates/omarchy-theme) 0.1 with the `tokio` feature. |
+| `xai-grok-pager-render/Cargo.toml` | Adds [`omarchy-themes`](https://crates.io/crates/omarchy-themes) 0.1 with the `tokio` feature. |
 | `xai-grok-pager-bin/src/main.rs` | The TUI's background update check is skipped when the running binary is not `<grok_home>/bin/grok`, the same gate the stdio agent already uses. Without it the updater treats the `-omarchy.<sha>` pre-release stamp as stale and shows "v1.0.13 available, press ctrl+u to restart" on every start. |
 
 Stock `grok` ignores the unknown name `omarchy` and falls back to Grok Night, so the config is safe for both binaries. `/theme` and `/settings` still list only the built-in themes; while omarchy mode is on they only change the syntax-highlight polarity underneath.

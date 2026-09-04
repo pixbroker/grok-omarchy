@@ -1,7 +1,7 @@
 From 0dc410c99c6b1c6e3b1425a028095f1a0ff8ae26 Mon Sep 17 00:00:00 2001
 From: pixbroker <324802287+pixbroker@users.noreply.github.com>
 Date: Fri, 4 Sep 2026 09:04:37 +0200
-Subject: [PATCH 2/3] Skip the TUI update check when the binary is not the
+Subject: [PATCH 2/4] Skip the TUI update check when the binary is not the
  managed install.
 
 needs_update() reports any running version with a pre-release suffix as

@@ -1,7 +1,7 @@
 From 27bb4b7188f441db35e3bd5caf57e3efe602d6ce Mon Sep 17 00:00:00 2001
 From: pixbroker <324802287+pixbroker@users.noreply.github.com>
 Date: Fri, 4 Sep 2026 09:04:37 +0200
-Subject: [PATCH 3/3] Take the Omarchy state, file read and watch from the
+Subject: [PATCH 3/4] Take the Omarchy state, file read and watch from the
  omarchy-theme crate.
 
 theme/omarchy.rs keeps what is Grok-specific: the slot table, the overlay
