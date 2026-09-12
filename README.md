@@ -26,7 +26,7 @@ That is the same moment Omarchy signals Ghostty, with no hook, no signal, and no
 
 The Omarchy side of the mechanism (locating the state directory, reading the rendered file, the swap-tolerant watch) is the shared crate [omarchy-themes](https://crates.io/crates/omarchy-themes), so any app can follow the theme the same way. Grok keeps only what is Grok-specific: the slot table and the render-cache stamp.
 
-`patches/` holds the `git format-patch` export of branch `omarchy` against upstream `72a61251`: three commits, one new file and a handful of lines elsewhere:
+`patches/` holds the `git format-patch` export of branch `omarchy` against upstream `72a61251`:
 
 | File | Change |
 |------|--------|
@@ -36,7 +36,7 @@ The Omarchy side of the mechanism (locating the state directory, reading the ren
 | `xai-grok-pager/src/scrollback/entry.rs`, `blocks/markdown_content.rs` | Render caches key on `ThemeStamp` so a new palette re-bakes old blocks. |
 | `xai-grok-pager/src/app/event_loop.rs` | One `select!` arm: watcher fired → reload → `apply_kind` + redraw. |
 | `xai-grok-pager-render/Cargo.toml` | Adds [`omarchy-themes`](https://crates.io/crates/omarchy-themes) 0.1 with the `tokio` feature. |
-| `xai-grok-pager-bin/src/main.rs` | The TUI's background update check is skipped when the running binary is not `<grok_home>/bin/grok`, the same gate the stdio agent already uses. Without it the updater treats the `-omarchy.<sha>` pre-release stamp as stale and shows "v1.0.13 available, press ctrl+u to restart" on every start. |
+| `xai-grok-pager-bin/src/main.rs`, `xai-grok-update/src/os_repo.rs` | Managed `<grok_home>/bin/grok` still checks the release channel and can adopt a staged download. A source build (this binary) cannot, but it still nags when the first CHANGELOG version on [`xai-org/grok-build`](https://github.com/xai-org/grok-build) main is ahead of the running release (`1.0.16-omarchy.<sha>` counts as `1.0.16`, so it no longer looks stale against a behind-stable pointer). Ctrl+U prints rebase instructions instead of running `grok update`. |
 
 Stock `grok` ignores the unknown name `omarchy` and falls back to Grok Night, so the config is safe for both binaries. `/theme` and `/settings` still list only the built-in themes; while omarchy mode is on they only change the syntax-highlight polarity underneath.
 

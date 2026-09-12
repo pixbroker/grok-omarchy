@@ -1,7 +1,7 @@
 From a2997ca666e82a2406a64381defc6fe774d71569 Mon Sep 17 00:00:00 2001
 From: pixbroker <324802287+pixbroker@users.noreply.github.com>
 Date: Fri, 4 Sep 2026 13:30:37 +0200
-Subject: [PATCH 4/4] Depend on omarchy-themes from crates.io.
+Subject: [PATCH 4/5] Depend on omarchy-themes from crates.io.
 
 ---
  Cargo.lock                                    | 28 +++++++++----------

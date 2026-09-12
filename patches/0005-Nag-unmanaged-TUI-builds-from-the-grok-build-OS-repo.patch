@@ -1,0 +1,464 @@
+From b9fc8c9de9d8809d45f698ce9e8f173fbcc2970a Mon Sep 17 00:00:00 2001
+From: pixbroker <324802287+pixbroker@users.noreply.github.com>
+Date: Fri, 4 Sep 2026 18:40:29 +0200
+Subject: [PATCH 5/5] Nag unmanaged TUI builds from the grok-build OS repo, not
+ stable.
+
+needs_update() on the stable channel treats any pre-release suffix as
+stale, so 1.0.16-omarchy.<sha> showed "v1.0.13 available" even though
+the source tree was already ahead of the pointer. Skipping the check
+dropped the nag entirely. Keep it: compare the running release
+(stripping the -omarchy.<sha> pre-release) to the first CHANGELOG
+version on xai-org/grok-build main. Do not download or run `grok
+update`; Ctrl+U prints rebase instructions instead.
+---
+ crates/codegen/xai-grok-pager-bin/src/main.rs | 109 ++++++--
+ .../xai-grok-update/src/auto_update.rs        |   9 +
+ crates/codegen/xai-grok-update/src/lib.rs     |   1 +
+ crates/codegen/xai-grok-update/src/os_repo.rs | 240 ++++++++++++++++++
+ crates/codegen/xai-grok-update/src/version.rs |   2 +-
+ 5 files changed, 337 insertions(+), 24 deletions(-)
+ create mode 100644 crates/codegen/xai-grok-update/src/os_repo.rs
+
+diff --git a/crates/codegen/xai-grok-pager-bin/src/main.rs b/crates/codegen/xai-grok-pager-bin/src/main.rs
+index e64a4344..c22708fd 100644
+--- a/crates/codegen/xai-grok-pager-bin/src/main.rs
++++ b/crates/codegen/xai-grok-pager-bin/src/main.rs
+@@ -2367,37 +2367,52 @@ async fn async_main(args: PagerArgs) -> Result<()> {
+     type UpdateWaitHandle = tokio::task::JoinHandle<std::io::Result<std::process::ExitStatus>>;
+     let bg_update_wait: std::sync::Arc<tokio::sync::Mutex<Option<UpdateWaitHandle>>> =
+         std::sync::Arc::new(tokio::sync::Mutex::new(None));
+-    // Same rule as the stdio agent: a binary that is not `<grok_home>/bin/grok` (a local build) cannot adopt a staged update,
+-    // so neither the restart hint nor the background download applies to it
++    // Managed installs (`<grok_home>/bin/grok`) check the release channel and can
++    // adopt a staged download. Source builds (grok-omarchy) cannot, but still nag
++    // when xai-org/grok-build's CHANGELOG is ahead of the running release.
++    let managed_install = is_managed_install(
++        std::env::current_exe().ok(),
++        &xai_grok_shell::util::grok_home::grok_home(),
++    );
+     let bg_update_rx: Option<tokio::sync::oneshot::Receiver<Option<auto_update::UpdateAvailable>>> =
+-        if should_check_for_updates(args.no_auto_update)
+-            && is_managed_install(
+-                std::env::current_exe().ok(),
+-                &xai_grok_shell::util::grok_home::grok_home(),
+-            )
+-        {
+-            let update_config = update_config.clone();
+-            let wait_slot = bg_update_wait.clone();
+-            let (tx, rx) = tokio::sync::oneshot::channel();
+-            tokio::spawn(async move {
+-                let check = auto_update::check_update_background(&update_config).await;
+-                if let Some(mut child) = check.download {
+-                    *wait_slot.lock().await = Some(tokio::spawn(async move { child.wait().await }));
+-                }
+-                let _ = tx.send(check.update);
+-            });
+-            Some(rx)
+-        } else {
+-            None
++        match background_update_source(
++            should_check_for_updates(args.no_auto_update),
++            managed_install,
++        ) {
++            BackgroundUpdateSource::None => None,
++            source => {
++                let update_config = update_config.clone();
++                let wait_slot = bg_update_wait.clone();
++                let (tx, rx) = tokio::sync::oneshot::channel();
++                tokio::spawn(async move {
++                    let check = match source {
++                        BackgroundUpdateSource::ManagedChannel => {
++                            auto_update::check_update_background(&update_config).await
++                        }
++                        BackgroundUpdateSource::OsRepo => {
++                            auto_update::BackgroundUpdateCheck::hint_only(
++                                xai_grok_update::os_repo::check_os_repo_update().await,
++                            )
++                        }
++                        BackgroundUpdateSource::None => unreachable!(),
++                    };
++                    if let Some(mut child) = check.download {
++                        *wait_slot.lock().await =
++                            Some(tokio::spawn(async move { child.wait().await }));
++                    }
++                    let _ = tx.send(check.update);
++                });
++                Some(rx)
++            }
+         };
+     let result = xai_grok_pager::app::run(args, bg_update_rx).await;
+     xai_grok_sandbox::flush();
+     match result {
+         Ok(true) => {
+             let adopted = bg_update_wait.lock().await.take();
+-            if finish_update_on_exit(adopted, &update_config).await {
++            if finish_update_on_exit(adopted, &update_config, managed_install).await {
+                 eprintln!("Update installed. Run `grok` to start.");
+-            } else {
++            } else if managed_install {
+                 eprintln!("Update did not complete. Run `grok update` to retry.");
+             }
+             Ok(())
+@@ -2417,7 +2432,15 @@ async fn async_main(args: PagerArgs) -> Result<()> {
+ async fn finish_update_on_exit(
+     adopted: Option<tokio::task::JoinHandle<std::io::Result<std::process::ExitStatus>>>,
+     update_config: &UpdateConfig,
++    managed_install: bool,
+ ) -> bool {
++    if !managed_install {
++        eprintln!(
++            "This binary is built from https://github.com/xai-org/grok-build and cannot adopt a staged update.\n\
++             A newer grok-build is available. In grok-omarchy, run scripts/rebase.sh and restart grok-omarchy."
++        );
++        return false;
++    }
+     let run_blocking = |reason: Option<String>| async move {
+         if let Some(reason) = reason {
+             eprintln!("{reason}");
+@@ -2479,6 +2502,27 @@ fn build_update_config() -> UpdateConfig {
+     }
+     config
+ }
++/// Where the interactive TUI should look for an update nag.
++#[derive(Debug, Clone, Copy, PartialEq, Eq)]
++enum BackgroundUpdateSource {
++    None,
++    ManagedChannel,
++    OsRepo,
++}
++
++fn background_update_source(
++    updates_enabled: bool,
++    managed_install: bool,
++) -> BackgroundUpdateSource {
++    if !updates_enabled {
++        BackgroundUpdateSource::None
++    } else if managed_install {
++        BackgroundUpdateSource::ManagedChannel
++    } else {
++        BackgroundUpdateSource::OsRepo
++    }
++}
++
+ /// Central gate for auto-update checks; add new suppression rules here, not at call sites.
+ fn should_check_for_updates(no_auto_update_flag: bool) -> bool {
+     if cfg!(debug_assertions) {
+@@ -3008,6 +3052,25 @@ mod tests {
+             "pinned binary"
+         );
+     }
++    #[test]
++    fn background_update_source_uses_os_repo_for_unmanaged_builds() {
++        assert_eq!(
++            background_update_source(false, true),
++            BackgroundUpdateSource::None
++        );
++        assert_eq!(
++            background_update_source(false, false),
++            BackgroundUpdateSource::None
++        );
++        assert_eq!(
++            background_update_source(true, true),
++            BackgroundUpdateSource::ManagedChannel
++        );
++        assert_eq!(
++            background_update_source(true, false),
++            BackgroundUpdateSource::OsRepo
++        );
++    }
+     use clap::Parser as _;
+     /// `grok dashboard` flags the startup hook without forcing leader mode.
+     /// The dashboard is independent of leader mode, so the launch keeps whatever leader setting the user (or config) chose.
+diff --git a/crates/codegen/xai-grok-update/src/auto_update.rs b/crates/codegen/xai-grok-update/src/auto_update.rs
+index 7a391e7e..b7ae1196 100644
+--- a/crates/codegen/xai-grok-update/src/auto_update.rs
++++ b/crates/codegen/xai-grok-update/src/auto_update.rs
+@@ -569,6 +569,15 @@ impl BackgroundUpdateCheck {
+             download: None,
+         }
+     }
++
++    /// Restart hint without a staged download. Used by unmanaged source builds
++    /// that check the OS repo instead of a release channel.
++    pub fn hint_only(update: Option<UpdateAvailable>) -> Self {
++        Self {
++            update,
++            download: None,
++        }
++    }
+ }
+ 
+ /// Check for available updates without blocking the TUI startup.
+diff --git a/crates/codegen/xai-grok-update/src/lib.rs b/crates/codegen/xai-grok-update/src/lib.rs
+index c8a97584..d406bd44 100644
+--- a/crates/codegen/xai-grok-update/src/lib.rs
++++ b/crates/codegen/xai-grok-update/src/lib.rs
+@@ -1,4 +1,5 @@
+ pub mod auto_update;
++pub mod os_repo;
+ pub mod version;
+ mod version_policy;
+ 
+diff --git a/crates/codegen/xai-grok-update/src/os_repo.rs b/crates/codegen/xai-grok-update/src/os_repo.rs
+new file mode 100644
+index 00000000..38c9f63a
+--- /dev/null
++++ b/crates/codegen/xai-grok-update/src/os_repo.rs
+@@ -0,0 +1,240 @@
++//! Version pointer for builds that come from the public grok-build tree, not a
++//! channel install.
++//!
++//! `needs_update` on the stable channel treats any pre-release (including the
++//! `1.0.16-omarchy.<sha>` stamp) as stale, so a source build that is already
++//! ahead of `https://x.ai/cli/stable` still got "v1.0.13 available". The TUI
++//! nag for those binaries compares against the first CHANGELOG version on
++//! `xai-org/grok-build` main instead, and never downloads a managed artifact.
++
++use std::time::Duration;
++
++use anyhow::Result;
++
++use crate::auto_update::UpdateAvailable;
++use crate::version::{get_installed_grok_version, is_loopback_base};
++
++/// First heading in the OS-repo changelog is the published source version.
++pub const OS_REPO_CHANGELOG_URL: &str = "https://raw.githubusercontent.com/xai-org/grok-build/main/crates/codegen/xai-grok-shell/CHANGELOG.md";
++
++const FETCH_TIMEOUT: Duration = Duration::from_secs(15);
++
++/// [`OS_REPO_CHANGELOG_URL`], unless tests set `GROK_OS_REPO_CHANGELOG_URL` to a
++/// loopback URL. Non-loopback overrides are ignored, matching `GROK_CLI_BASE_URL`.
++fn changelog_url() -> String {
++    if let Ok(url) = std::env::var("GROK_OS_REPO_CHANGELOG_URL") {
++        let url = url.trim();
++        if is_loopback_base(url) {
++            return url.to_owned();
++        }
++        if !url.is_empty() {
++            tracing::warn!("GROK_OS_REPO_CHANGELOG_URL ignored: only loopback URLs are honored");
++        }
++    }
++    OS_REPO_CHANGELOG_URL.to_string()
++}
++
++/// First `# X.Y.Z` heading in a grok-build CHANGELOG.md body.
++pub fn parse_changelog_version(text: &str) -> Option<String> {
++    for line in text.lines() {
++        let Some(rest) = line.trim().strip_prefix("# ") else {
++            continue;
++        };
++        let Some(ver) = rest.split_whitespace().next() else {
++            continue;
++        };
++        if semver::Version::parse(ver).is_ok() {
++            return Some(ver.to_string());
++        }
++    }
++    None
++}
++
++/// True when the OS repo's release is newer than the running build's release.
++///
++/// `1.0.16-omarchy.<sha>` is the same release as `1.0.16`: the pre-release
++/// suffix must not make a source build look stale against its own changelog.
++/// Changelog versions are plain `X.Y.Z`; a pre-release pointer is rejected.
++pub fn os_repo_is_newer(current: &str, os_repo: &str) -> bool {
++    let Ok(current) = semver::Version::parse(current) else {
++        return false;
++    };
++    let Ok(os_repo) = semver::Version::parse(os_repo) else {
++        return false;
++    };
++    if !os_repo.pre.is_empty() {
++        return false;
++    }
++    let current_release = semver::Version::new(current.major, current.minor, current.patch);
++    os_repo > current_release
++}
++
++pub(crate) async fn fetch_os_repo_version_from(url: &str) -> Result<String> {
++    let client = xai_grok_extra_ca::build_reqwest_client(|builder| {
++        builder.timeout(FETCH_TIMEOUT).user_agent("grok-build")
++    })?;
++    let resp = client.get(url).send().await?;
++    if !resp.status().is_success() {
++        anyhow::bail!(
++            "OS repo changelog fetch failed: HTTP {} for {}",
++            resp.status(),
++            url
++        );
++    }
++    let body = resp.text().await?;
++    parse_changelog_version(&body).ok_or_else(|| {
++        anyhow::anyhow!("OS repo changelog at {url} has no '# X.Y.Z' version heading")
++    })
++}
++
++/// Fetch the OS-repo changelog and return [`UpdateAvailable`] when it is ahead
++/// of the running release. Fails open: any fetch or parse error is `None`.
++///
++/// Skips the check when `cli.auto_update` is explicitly `false`, matching the
++/// managed-channel background path. Does not read or write `version.json`.
++pub async fn check_os_repo_update() -> Option<UpdateAvailable> {
++    let current_config = xai_grok_shell::util::config::load_config().await;
++    if current_config.cli.auto_update == Some(false) {
++        return None;
++    }
++    check_os_repo_update_from(&changelog_url(), &get_installed_grok_version()).await
++}
++
++/// Like [`check_os_repo_update`], but uses an explicit changelog URL and
++/// running version. No config / auto_update gate.
++pub async fn check_os_repo_update_from(url: &str, current: &str) -> Option<UpdateAvailable> {
++    match fetch_os_repo_version_from(url).await {
++        Ok(latest) if os_repo_is_newer(current, &latest) => {
++            tracing::info!(
++                %current,
++                %latest,
++                "OS repo has a newer grok-build release"
++            );
++            Some(UpdateAvailable {
++                latest_version: latest,
++            })
++        }
++        Ok(latest) => {
++            tracing::debug!(
++                %current,
++                %latest,
++                "running build is at or ahead of the OS repo"
++            );
++            None
++        }
++        Err(e) => {
++            tracing::warn!("OS repo update check failed: {e:#}");
++            None
++        }
++    }
++}
++
++#[cfg(test)]
++mod tests {
++    use super::*;
++
++    #[test]
++    fn parse_changelog_version_takes_the_first_semver_heading() {
++        let body = "# Changelog\n\n# 1.0.16 — 2026-09-01\n\n## Features\n\n# 1.0.15 — 2026-08-31\n";
++        assert_eq!(
++            parse_changelog_version(body).as_deref(),
++            Some("1.0.16"),
++            "em-dash date headings"
++        );
++        assert_eq!(
++            parse_changelog_version("# 1.0.17\n").as_deref(),
++            Some("1.0.17")
++        );
++        assert_eq!(
++            parse_changelog_version("# Changelog\n\nno versions\n"),
++            None
++        );
++        assert_eq!(parse_changelog_version(""), None);
++        assert_eq!(
++            parse_changelog_version("# 1.0\n# 1.0.16\n").as_deref(),
++            Some("1.0.16"),
++            "partial versions are not semver"
++        );
++    }
++
++    #[test]
++    fn os_repo_is_newer_strips_omarchy_prerelease_and_rejects_downgrades() {
++        let cases: &[(&str, &str, bool)] = &[
++            // same release as the changelog we were built from
++            ("1.0.16-omarchy.a2997ca6", "1.0.16", false),
++            ("1.0.16", "1.0.16", false),
++            // OS repo moved on
++            ("1.0.16-omarchy.a2997ca6", "1.0.17", true),
++            ("1.0.16", "1.0.17", true),
++            // source build already ahead of the published changelog
++            ("1.0.17-omarchy.deadbeef", "1.0.16", false),
++            ("1.0.17", "1.0.16", false),
++            // the original false nag: stable 1.0.13 vs omarchy 1.0.16
++            ("1.0.16-omarchy.a2997ca6", "1.0.13", false),
++            // garbage
++            ("not-a-version", "1.0.17", false),
++            ("1.0.16", "garbage", false),
++            // changelog must be a release
++            ("1.0.16", "1.0.17-alpha.1", false),
++        ];
++        for (current, os_repo, expected) in cases {
++            assert_eq!(
++                os_repo_is_newer(current, os_repo),
++                *expected,
++                "os_repo_is_newer({current:?}, {os_repo:?})"
++            );
++        }
++    }
++
++    #[tokio::test]
++    async fn check_os_repo_update_from_nags_only_when_changelog_is_ahead() {
++        use wiremock::matchers::{method, path};
++        use wiremock::{Mock, MockServer, ResponseTemplate};
++
++        let server = MockServer::start().await;
++        Mock::given(method("GET"))
++            .and(path("/CHANGELOG.md"))
++            .respond_with(
++                ResponseTemplate::new(200)
++                    .set_body_string("# Changelog\n\n# 1.0.17 — 2026-09-04\n"),
++            )
++            .mount(&server)
++            .await;
++        let url = format!("{}/CHANGELOG.md", server.uri());
++
++        let nag = check_os_repo_update_from(&url, "1.0.16-omarchy.a2997ca6")
++            .await
++            .expect("1.0.17 is ahead of 1.0.16-omarchy");
++        assert_eq!(nag.latest_version, "1.0.17");
++
++        assert!(
++            check_os_repo_update_from(&url, "1.0.17-omarchy.deadbeef")
++                .await
++                .is_none(),
++            "same release as the changelog must not nag"
++        );
++        assert!(
++            check_os_repo_update_from(&url, "1.0.18-omarchy.ffff")
++                .await
++                .is_none(),
++            "a newer source stamp must not nag to go backwards"
++        );
++    }
++
++    #[tokio::test]
++    async fn check_os_repo_update_from_fails_open_on_http_error() {
++        use wiremock::matchers::method;
++        use wiremock::{Mock, MockServer, ResponseTemplate};
++
++        let server = MockServer::start().await;
++        Mock::given(method("GET"))
++            .respond_with(ResponseTemplate::new(404))
++            .mount(&server)
++            .await;
++        assert!(
++            check_os_repo_update_from(&format!("{}/CHANGELOG.md", server.uri()), "1.0.16")
++                .await
++                .is_none()
++        );
++    }
++}
+diff --git a/crates/codegen/xai-grok-update/src/version.rs b/crates/codegen/xai-grok-update/src/version.rs
+index f87df2c7..14032f96 100644
+--- a/crates/codegen/xai-grok-update/src/version.rs
++++ b/crates/codegen/xai-grok-update/src/version.rs
+@@ -41,7 +41,7 @@ pub(crate) fn cli_base_urls() -> Vec<String> {
+ 
+ /// Parsed, not prefix-matched: `http://127.0.0.1:9@evil.com` starts with a
+ /// loopback prefix but its host is `evil.com` (userinfo trick).
+-fn is_loopback_base(base: &str) -> bool {
++pub(crate) fn is_loopback_base(base: &str) -> bool {
+     let Ok(u) = url::Url::parse(base) else {
+         return false;
+     };
+-- 
+2.55.0
+
